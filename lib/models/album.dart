@@ -1,38 +1,51 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import 'interface/has_title_and_image.dart';
 
-class Album implements HasTitleAndImage{
+class Album implements HasTitleAndImage {
   final String id;
   final String title;
-  final String artistId;
   final String coverUrl;
-  final Timestamp? releaseDate;
-  final String type;
+  final String? artistId;
+  final String? userId;
+  final DateTime createdAt;
 
   Album({
     required this.id,
     required this.title,
-    required this.artistId,
-    required this.type,
+    this.artistId,
+    this.userId,
     required this.coverUrl,
-    this.releaseDate
-  });
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
+
   @override
   String get displayTitle => title;
 
   @override
   String get displayImageUrl => coverUrl;
 
-  factory Album.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data()!;
+  /// Tạo object từ Supabase row
+  factory Album.fromMap(Map<String, dynamic> map) {
     return Album(
-      id: doc.id,
-      title: data['title'] ?? 'No title',
-      artistId: data['artistId'] ?? '',
-      coverUrl: data['coverUrl'] ?? '',
-      releaseDate: data['releaseDate'],
-      type: data['type'],
+      id: map['id'] ?? '',
+      title: map['title'] ?? 'No title',
+      coverUrl: map['cover_url'] ?? '',
+      artistId: map['artist_id'],
+      userId: map['user_id'],
+      createdAt: map['created_at'] != null
+          ? DateTime.tryParse(map['created_at'].toString()) ?? DateTime.now()
+          : DateTime.now(),
     );
+  }
+
+  /// Convert về Map để insert/update vào Supabase
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'title': title,
+      'cover_url': coverUrl,
+      'artist_id': artistId,
+      'user_id': userId,
+      'created_at': createdAt.toIso8601String(),
+    };
   }
 }

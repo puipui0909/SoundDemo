@@ -22,7 +22,23 @@ class RegisterOrSign extends StatelessWidget{
               padding: const EdgeInsets.only(
                   top: 45,
                   bottom:30),
-              child: Image.asset('assets/images/loading.png', width: 235,height: 71),
+              child: RichText(
+                text: TextSpan(
+                  style: const TextStyle(
+                    fontSize: 40,
+                    fontWeight: FontWeight.bold,// màu mặc định
+                  ),
+                  children: [
+                    const TextSpan(
+                      text: 'Sound',
+                      style: TextStyle(color: Colors.green),
+                    ),
+                    const TextSpan(
+                      text: 'Demo',
+                    ),
+                  ],
+                ),
+              )
             ),
             Text('Enjoy listening to music', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 26),),
             SizedBox(height: 25,),

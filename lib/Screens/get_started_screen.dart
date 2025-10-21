@@ -13,7 +13,7 @@ class GetStartedScreen extends StatelessWidget{
               children: [
                 Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Image.asset('assets/images/loading.png'),
+                  child: Text('Welcome', style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold),)
                 ),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 24.0),

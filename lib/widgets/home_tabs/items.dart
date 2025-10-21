@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:spotify_clone/models/artist.dart';
+import 'package:spotify_clone/widgets/like_button.dart';
 import '../../models/song.dart';
 import '../../Screens/player_screen.dart';
 import '../../Screens/artist_screen.dart';
+import 'package:persistent_bottom_nav_bar/persistent_bottom_nav_bar.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 enum MediaType { song, artist }
 
 class MediaItem extends StatelessWidget {
   final MediaType type;
   final Song? song;
+  final List<Song>? playlist; // ✅ danh sách bài hát
   final Artist? artist;
+  final int? index; // ✅ vị trí bài trong danh sách
 
   final double width;
   final double height;
@@ -20,6 +24,8 @@ class MediaItem extends StatelessWidget {
     required this.song,
     this.width = 147,
     this.height = 193,
+    this.playlist,
+    this.index,
   })  : type = MediaType.song,
         artist = null;
 
@@ -29,7 +35,9 @@ class MediaItem extends StatelessWidget {
     this.width = 147,
     this.height = 147,
   })  : type = MediaType.artist,
-        song = null;
+        song = null,
+        playlist = null,
+        index = null;
 
   @override
   Widget build(BuildContext context) {
@@ -44,22 +52,39 @@ class MediaItem extends StatelessWidget {
   /// ================= SONG ITEM =================
   Widget _buildSongItem(BuildContext context) {
     final songData = song!;
+    final userId = Supabase.instance.client.auth.currentUser?.id ?? "guest";
+
     return InkWell(
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => PlayerScreen(song: songData,),
-          ),
-        );
+        if (playlist != null && index != null) {
+          // ✅ Có playlist → mở theo danh sách
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PlayerScreen(
+                playlist: playlist!,
+                initialIndex: index!,
+              ),
+            ),
+          );
+        } else {
+          // ✅ fallback: chỉ có 1 bài → dùng constructor phụ
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PlayerScreen.single(song: songData),
+            ),
+          );
+        }
       },
+
       child: Container(
         width: width,
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cover
+            /// Cover
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: Image.network(
@@ -76,6 +101,8 @@ class MediaItem extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 3),
+
+            /// Tên bài hát
             Text(
               songData.title,
               maxLines: 1,
@@ -85,28 +112,63 @@ class MediaItem extends StatelessWidget {
                 fontSize: 14,
               ),
             ),
-            // Artist name
-            FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance
-                  .collection('artist')
-                  .doc(songData.artistId)
-                  .get(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Text("Đang tải...");
-                }
-                if (!snapshot.hasData || !snapshot.data!.exists) {
-                  return const Text("Unknown Artist");
-                }
-                final artistData =
-                snapshot.data!.data() as Map<String, dynamic>;
-                return Text(
-                  artistData['name'] ?? "Unknown Artist",
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12),
-                );
-              },
+
+            /// Artist name + like button
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                /// Lấy artist từ Supabase
+                Expanded(
+                  child: FutureBuilder<Map<String, dynamic>?>(
+                    future: Supabase.instance.client
+                        .from('artists')
+                        .select()
+                        .eq('id', songData.artistId)
+                        .maybeSingle(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Text("Đang tải...");
+                      }
+                      if (!snapshot.hasData || snapshot.data == null) {
+                        return const Text("Unknown Artist");
+                      }
+                      final artistData = snapshot.data!;
+                      return Text(
+                        artistData['name'] ?? "Unknown Artist",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      );
+                    },
+                  ),
+                ),
+
+                /// Like button + đếm likes
+                StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: Supabase.instance.client
+                      .from('song_likes')
+                      .stream(primaryKey: ['id'])
+                      .eq('song_id', songData.id),
+                  builder: (context, snapshot) {
+                    final allLikes = snapshot.data ?? [];
+                    final isLiked =
+                    allLikes.any((row) => row['user_id'] == userId);
+
+                    return Column(
+                      children: [
+                        LikeButton(song: songData),
+                        Text(
+                          allLikes.length.toString(),
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                )
+              ],
             )
           ],
         ),
@@ -119,11 +181,11 @@ class MediaItem extends StatelessWidget {
     final artistData = artist!;
     return InkWell(
       onTap: () {
-        Navigator.push(
+        PersistentNavBarNavigator.pushNewScreen(
           context,
-          MaterialPageRoute(
-            builder: (_) => ArtistScreen(artistId: artistData.id!),
-          ),
+          screen: ArtistOrUserScreen(artistId: artistData.id),
+          withNavBar: true,
+          pageTransitionAnimation: PageTransitionAnimation.cupertino,
         );
       },
       child: Container(
@@ -133,7 +195,7 @@ class MediaItem extends StatelessWidget {
           children: [
             ClipOval(
               child: Image.network(
-                artistData.avatar,
+                artistData.avatarUrl,
                 width: width,
                 height: width,
                 fit: BoxFit.cover,

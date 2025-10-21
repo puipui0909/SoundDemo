@@ -5,6 +5,7 @@ class ListWidget<T> extends StatelessWidget {
   final String Function(T) getTitle;       // cách lấy title
   final String? Function(T) getCoverUrl;   // cách lấy ảnh
   final void Function(BuildContext, T) onTap; // xử lý khi click
+  final List<Widget> Function(BuildContext, T)? actionsBuilder;
 
   const ListWidget({
     super.key,
@@ -12,6 +13,7 @@ class ListWidget<T> extends StatelessWidget {
     required this.getTitle,
     required this.getCoverUrl,
     required this.onTap,
+    this.actionsBuilder,
   });
 
   @override
@@ -47,6 +49,12 @@ class ListWidget<T> extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           onTap: () => onTap(context, item),
+          trailing: actionsBuilder != null
+              ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: actionsBuilder!(context, item),
+          )
+              : null,
         );
       },
     );

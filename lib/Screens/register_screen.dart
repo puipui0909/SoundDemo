@@ -1,7 +1,5 @@
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/gestures.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../widgets/custom_appbar.dart';
 
@@ -9,6 +7,7 @@ import '../widgets/register_and_sigin/auth_redirect_text.dart';
 import '../widgets/register_and_sigin/field_button.dart';
 import '../widgets/register_and_sigin/or_divider.dart';
 import '../widgets/register_and_sigin/social_login_button.dart';
+import '../widgets/register_and_sigin/text_field.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({Key? key}) : super(key: key);
@@ -26,6 +25,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
 
+  void _togglePasswordVisibility(){
+    setState(() {
+      _obscurePassword = !_obscurePassword;
+    });
+  }
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -38,101 +43,57 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
+
+    final supabase = Supabase.instance.client;
+
     try {
-      final userCred = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(
+      final response = await supabase.auth.signUp(
         email: _emailCtrl.text.trim(),
         password: _passCtrl.text.trim(),
+        data: {'full_name': _nameCtrl.text.trim()},
       );
 
-      final user = userCred.user;
-      if (user != null) {
-        await user.updateDisplayName(_nameCtrl.text.trim());
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-          'uid': user.uid,
-          'fullName': _nameCtrl.text.trim(),
-          'email': _emailCtrl.text.trim(),
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-
+      final user = response.user;
+      if (user == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Tạo tài khoản thành công')),
+          const SnackBar(content: Text('Không tạo được tài khoản')),
         );
-        Navigator.pushReplacementNamed(context, '/home');
+        return;
       }
-    } on FirebaseAuthException catch (e) {
-      final msg = switch (e.code) {
-        'email-already-in-use' => 'Email đã được sử dụng',
-        'invalid-email' => 'Email không hợp lệ',
-        'weak-password' => 'Mật khẩu quá yếu',
-        _ => 'Xảy ra lỗi'
-      };
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tạo tài khoản thành công')),
+      );
+
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/main');
+      }
+    } on PostgrestException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lỗi database: ${e.message}')),
+      );
+    } on AuthException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lỗi đăng ký: ${e.message}')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Có lỗi xảy ra: $e')),
+      );
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
-  // ✅ Widget chung cho TextField
-  Widget _field({
-    required String label,
-    required TextEditingController ctrl,
-    required String? Function(String?) validator,
-    bool isPassword = false,
-  }) =>
-      SizedBox(
-        width: MediaQuery.of(context).size.width * 0.85,
-        child: TextFormField(
-          controller: ctrl,
-          obscureText: isPassword ? _obscurePassword : false,
-          decoration: InputDecoration(
-            labelText: label,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
-            suffixIcon: isPassword
-                ? IconButton(
-              icon: Icon(
-                  _obscurePassword ? Icons.visibility_off : Icons.visibility),
-              onPressed: () =>
-                  setState(() => _obscurePassword = !_obscurePassword),
-            )
-                : null,
-          ),
-          validator: validator,
-        ),
-      );
-
-  // ✅ Validator
-  String? _validate(String? v, String field) {
-    if (v == null || v.isEmpty) return 'Please enter your $field';
-    if (field == 'email' && (!v.contains('@') || !v.contains('.'))) {
-      return 'Invalid email';
-    }
-    if (field == 'password' && v.length < 6) {
-      return 'Your password needs at least 6 characters';
-    }
-    return null;
-  }
-
-  // ✅ Nút social login
-  Widget _socialButton(String path) => ElevatedButton(
-    style: ElevatedButton.styleFrom(
-      elevation: 0,
-      backgroundColor: Colors.transparent,
-      shadowColor: Colors.transparent,
-    ),
-    onPressed: () {},
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.asset(path, height: 40, width: 40, fit: BoxFit.cover),
-    ),
-  );
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: CustomAppBar(onBack: (){
+      appBar: CustomAppBar(
+        onBack: (){
         Navigator.pop(context);
-      },),
+        },
+        title: 'REGISTER',
+      ),
       body: Center(
         child: SingleChildScrollView(
           child: Form(
@@ -143,25 +104,44 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 30)),
                 const SizedBox(height: 20),
 
-                _field(
+                CustomTextField(
                   label: 'Full Name',
-                  ctrl: _nameCtrl,
-                  validator: (v) => _validate(v, 'full name'),
+                  controller: _nameCtrl,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Vui lòng nhập họ tên';
+                    }
+                    return null; // hợp lệ
+                  },
                 ),
                 const SizedBox(height: 12),
-
-                _field(
+                CustomTextField(
                   label: 'Enter Email',
-                  ctrl: _emailCtrl,
-                  validator: (v) => _validate(v, 'email'),
+                  controller: _emailCtrl,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Vui lòng nhập email';
+                    }
+                    if (!value.contains('@')) {
+                      return 'Email không hợp lệ';
+                    }
+                    return null; // hợp lệ
+                  },
                 ),
                 const SizedBox(height: 12),
-
-                _field(
+                CustomTextField(
                   label: 'Password',
-                  ctrl: _passCtrl,
+                  controller: _passCtrl,
                   isPassword: true,
-                  validator: (v) => _validate(v, 'password'),
+                  obscureText: _obscurePassword,
+                  validator: (value){
+                    if(value == null || value.isEmpty)
+                      return 'Mật khẩu không được để trống';
+                    if(value.length < 6)
+                      return 'Mật khẩu phải dài hơn 6 kí tự';
+                    return null;
+                  },
+                  onTogglePassword: _togglePasswordVisibility,
                 ),
                 const SizedBox(height: 20),
                 FieldButton(type: 'createAccount', action: _isLoading ? null : _createAccount),
