@@ -258,7 +258,7 @@ class ProfileScreen extends StatelessWidget {
           ],
         ),
 
-        floatingActionButton: (isCurrentUser || isAdmin)
+        floatingActionButton: (isCurrentUser)
             ? FloatingActionButton(
           onPressed: () {
             Navigator.push(

@@ -7,6 +7,10 @@ import '../models/song.dart';
 import '../models/artist.dart';
 import '../widgets/like_button.dart';
 
+import 'package:spotify_clone/main.dart';
+import 'package:audio_service/audio_service.dart';
+import '../service/audio_handler.dart';
+
 class PlayerScreen extends StatefulWidget {
   final List<Song> playlist;
   final int initialIndex;
@@ -33,18 +37,29 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  late AudioPlayer _player;
-  late ConcatenatingAudioSource _playlist;
   final supabase = Supabase.instance.client;
-
-  int get currentIndex => _player.currentIndex ?? 0;
-  Song get currentSong => widget.playlist[currentIndex];
   AppUser? _currentUser;
+
+  // Lấy Index từ AudioHandler
+  int get currentIndex => audioHandler.playbackState.value.queueIndex ?? 0;
+
+  // Lấy bài hát hiện tại
+  Song? get currentSong {
+    // Lấy chỉ mục từ AudioHandler
+    final index = audioHandler.playbackState.value.queueIndex;
+
+    // Kiểm tra tính hợp lệ
+    if (index != null && index >= 0 && index < widget.playlist.length) {
+      return widget.playlist[index];
+    }
+
+    // Trả về null nếu không có index hợp lệ hoặc playlist rỗng
+    return null;
+  }
 
   @override
   void initState() {
     super.initState();
-    _player = AudioPlayer();
     _initPlaylist();
     _loadUser();
   }
@@ -55,52 +70,52 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _initPlaylist() async {
-    _playlist = ConcatenatingAudioSource(
-      children: widget.playlist
-          .map((s) => AudioSource.uri(Uri.parse(s.audioUrl!)))
-          .toList(),
-    );
+    // 1. Chuyển đổi Playlist sang MediaItem
+    final mediaItems = widget.playlist
+        .map((s) => MediaItem(
+      id: s.audioUrl!,
+      title: s.title,
+      artist: s.artistId,
+      album: 'Spotify Clone',
+      artUri: Uri.parse(s.coverUrl ?? ''),
+      duration: s.duration != null
+          ? Duration(milliseconds: s.duration! * 1000)
+          : null,
+    ))
+        .toList();
 
-    await _player.setAudioSource(
-      _playlist,
-      initialIndex: widget.initialIndex,
-      preload: true,
-    );
-
-    // 🔧 Đợi player load xong rồi mới play
-    _player.processingStateStream.firstWhere(
-          (state) => state == ProcessingState.ready,
-    ).then((_) async {
-      await Future.delayed(const Duration(milliseconds: 200));
-      _player.play();
-    });
-
-    // Xử lý khi hết bài
-    _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.completed) {
-        if (currentIndex < widget.playlist.length - 1) {
-          _player.seekToNext();
-        } else {
-          _player.seek(Duration.zero);
-          _player.pause();
-        }
-      }
-    });
+    // 2. Gọi hàm khởi tạo Playlist trong AudioHandler
+    // Ép kiểu thành AudioPlayerHandler để gọi initAndPlayPlaylist
+    if (audioHandler is AudioPlayerHandler) {
+      await (audioHandler as AudioPlayerHandler).initAndPlayPlaylist(
+        mediaItems: mediaItems,
+        initialIndex: widget.initialIndex,
+      );
+    }
   }
 
   @override
   void dispose() {
-    _player.dispose();
     super.dispose();
   }
 
   Stream<PositionData> get _positionDataStream =>
       rxdart.Rx.combineLatest3<Duration, Duration, Duration?, PositionData>(
-        _player.positionStream,
-        _player.bufferedPositionStream,
-        _player.durationStream,
-            (position, buffered, duration) =>
-            PositionData(position, buffered, duration ?? Duration.zero),
+        // Lấy vị trí từ PlaybackState (được cập nhật thường xuyên)
+        audioHandler.playbackState.map((state) => state.updatePosition),
+        // Lấy vị trí buffered từ PlaybackState
+        audioHandler.playbackState.map((state) => state.bufferedPosition),
+        // Lấy duration từ MediaItem (cập nhật khi bài hát chuyển)
+        audioHandler.mediaItem.map((item) => item?.duration),
+            (position, buffered, duration) {
+              // SỬ DỤNG DURATION TỪ MEDIAITEM (Đã được cập nhật từ just_audio)
+              // Nếu duration từ MediaItem là null, dùng duration từ database (đã nhân 1000)
+              final finalDuration = duration ?? (currentSong?.duration != null
+                ? Duration(milliseconds: currentSong!.duration! * 1000)
+                : Duration.zero);
+
+              return PositionData(position, buffered, finalDuration);
+            },
       );
 
   Future<Artist?> _fetchArtist(String artistId) async {
@@ -116,9 +131,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<int?>(
-      stream: _player.currentIndexStream,
+      stream: audioHandler.playbackState.map((state) => state.queueIndex).distinct(),
       builder: (context, snapshot) {
+
         final song = currentSong;
+
+        if (song == null) {
+          return Scaffold(
+            appBar: AppBar(
+              leading: IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.keyboard_arrow_down),
+              ),
+              backgroundColor: Colors.transparent,
+              title: const Text("Now Playing"),
+              centerTitle: true,
+            ),
+            body: const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: Colors.green),
+                  SizedBox(height: 16),
+                  Text("Loading music...", style: TextStyle(fontSize: 16)),
+                ],
+              ),
+            ),
+          );
+        }
 
         return Scaffold(
           appBar: AppBar(
@@ -197,10 +237,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   stream: _positionDataStream,
                   builder: (context, snapshot) {
                     final positionData = snapshot.data;
-                    final duration =
-                        positionData?.duration.inMilliseconds.toDouble() ?? 1.0;
-                    final position =
-                        positionData?.position.inMilliseconds.toDouble() ?? 0.0;
+                    final duration = positionData?.duration.inMilliseconds.toDouble() ?? 1.0;
+                    final position = positionData?.position.inMilliseconds.toDouble() ?? 0.0;
                     final safeValue = position.clamp(0.0, duration);
 
                     return Column(
@@ -211,9 +249,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           min: 0.0,
                           max: duration > 0 ? duration : 1.0,
                           value: safeValue,
-                          onChanged: (value) {
-                            _player
-                                .seek(Duration(milliseconds: value.toInt()));
+                          onChanged: (_) {},
+                          onChangeEnd: (value) {
+                            audioHandler.seek(Duration(milliseconds: value.toInt()));
                           },
                         ),
                         Row(
@@ -239,39 +277,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 const SizedBox(height: 24),
 
                 /// Controls
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.skip_previous, size: 36),
-                      onPressed:
-                      _player.hasPrevious ? _player.seekToPrevious : null,
-                    ),
-                    StreamBuilder<PlayerState>(
-                      stream: _player.playerStateStream,
-                      builder: (context, snapshot) {
-                        final playing = snapshot.data?.playing ?? false;
-                        if (playing) {
-                          return IconButton(
-                            icon:
-                            const Icon(Icons.pause_circle_filled, size: 64),
-                            onPressed: () => _player.pause(),
-                          );
-                        } else {
-                          return IconButton(
-                            icon:
-                            const Icon(Icons.play_circle_fill, size: 64),
-                            onPressed: () => _player.play(),
-                          );
-                        }
-                      },
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.skip_next, size: 36),
-                      onPressed:
-                      _player.hasNext ? _player.seekToNext : null,
-                    ),
-                  ],
+                StreamBuilder<PlaybackState>(
+                  stream: audioHandler.playbackState, // Lắng nghe PlaybackState
+                  builder: (context, snapshot) {
+                    final state = snapshot.data;
+                    final playing = state?.playing ?? false;
+
+                    // Kiểm tra Controls có sẵn (Skip Next/Previous)
+                    final hasPrevious = state?.controls.contains(MediaControl.skipToPrevious) ?? false;
+                    final hasNext = state?.controls.contains(MediaControl.skipToNext) ?? false;
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        //nút pre
+                        IconButton(
+                          icon: const Icon(Icons.skip_previous, size: 36),
+                          onPressed: hasPrevious ? audioHandler.skipToPrevious : null, // Gọi AudioHandler
+                        ),
+
+                        //nút play
+                        if (playing)
+                          IconButton(
+                            icon: const Icon(Icons.pause_circle_filled, size: 64),
+                            onPressed: audioHandler.pause, // Gọi AudioHandler
+                          )
+                        else
+                          IconButton(
+                            icon: const Icon(Icons.play_circle_fill, size: 64),
+                            onPressed: audioHandler.play, // Gọi AudioHandler
+                          ),
+
+                        // Nút Skip Next
+                        IconButton(
+                          icon: const Icon(Icons.skip_next, size: 36),
+                          onPressed: hasNext ? audioHandler.skipToNext : null, // Gọi AudioHandler
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),

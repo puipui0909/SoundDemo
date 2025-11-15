@@ -54,9 +54,7 @@ class UsersScreen extends StatelessWidget {
                 MaterialPageRoute(
                   builder: (_) => ProfileScreen(
                     userId: user.id,
-                    isAdmin: currentUser != null &&
-                        currentUser.id == user.id &&
-                        user.role == 'admin',
+                      isAdmin: true,
                   ),
                 ),
               );
@@ -71,7 +69,7 @@ class UsersScreen extends StatelessWidget {
     final supabase = _userService.supabase;
     final response = await supabase
         .from('users')
-        .select('id, full_name, email, role, avatar_url, created_at'); // 👈 thêm avatar_url
+        .select('id, full_name, email, role, avatar_url, created_at');
     return (response as List)
         .map((row) => AppUser.fromMap(Map<String, dynamic>.from(row)))
         .toList();

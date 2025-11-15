@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:persistent_bottom_nav_bar/persistent_bottom_nav_bar.dart';
+import 'package:audio_service/audio_service.dart';
 import 'package:spotify_clone/Screens/main_page/profile_screen.dart';
+import 'package:spotify_clone/main.dart';
+import 'package:spotify_clone/widgets/now_playing_bar.dart';
 
 import 'home_screen.dart';
 import 'library.dart';
@@ -50,16 +53,47 @@ class _MainPageState extends State<MainPage> {
       ),
     ];
   }
+  static const double bottomNavBarHeight = 60.0;
+  static const double miniPlayerHeight = 60.0;
 
   @override
   Widget build(BuildContext context) {
-    return PersistentTabView(
-      context,
-      controller: _controller,
-      screens: _buildScreens(),
-      items: _navBarsItems(),
-      navBarStyle: NavBarStyle.style6, // style gọn đẹp
-      backgroundColor: Theme.of(context).colorScheme.surface,
+    return StreamBuilder<MediaItem?>(
+        stream: audioHandler.mediaItem,
+        builder: (context, snapshot) {
+          final mediaItem = snapshot.data;
+          final bool isMusicPlaying = mediaItem != null;
+
+          return Stack(
+              children: [
+
+                // 1. PersistentTabView (Nội dung chính)
+                // Bỏ Expanded. PersistentTabView sẽ tự động chiếm toàn bộ Stack.
+                PersistentTabView(
+                  context,
+                  controller: _controller,
+                  screens: _buildScreens(),
+                  items: _navBarsItems(),
+                  navBarStyle: NavBarStyle.style6,
+                  backgroundColor: Theme.of(context).colorScheme.surface,
+                ),
+
+                // 2. MINI-PLAYER (Điều kiện) - Giữ nguyên
+                if (isMusicPlaying)
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const NowPlayingBar(),
+                        // Đệm: Đảm bảo Mini-Player nằm ngay trên Nav Bar
+                        SizedBox(height: bottomNavBarHeight),
+                      ],
+                    ),
+                  ),
+              ]
+          );
+        }
     );
   }
 }
